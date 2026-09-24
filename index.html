@@ -17,31 +17,42 @@
 <main class="app">
 <header class="brand"><img src="piker-logo.jpeg" alt="PIKER Przewozy Osobowe"><div class="sub">DROGOMIERZ 2.0</div></header>
 <section class="panel meter"><div class="eyebrow">Do zapłaty</div><div id="fare" class="price">0,00 <small>zł</small></div><div id="distance" class="km">0,000 km</div><div id="status" class="status">Wybierz taryfę i rozpocznij kurs</div></section>
+<section class="actions"><button id="start" class="btn start">▶ START KURSU</button><button id="stop" class="btn stop" disabled>■ ZAKOŃCZ</button><button id="reset" class="btn reset">↻ NOWY KURS / WYCZYŚĆ</button></section>
 <section class="panel"><div class="eyebrow">Taryfa przed rozpoczęciem kursu</div><div class="tariffs">
 <button class="tariff active" data-id="1"><span>1 • Dzienna 6–22</span><small>Opłata początkowa 8 zł • 4 zł/km</small></button>
 <button class="tariff" data-id="2"><span>2 • Nocna 22–6, Święta i niedziele</span><small>Opłata początkowa 8 zł • 5 zł/km</small></button>
 <button class="tariff" data-id="3"><span>3 • BMW premium</span><small>Opłata początkowa 30 zł • 6 zł/km</small></button>
 </div></section>
-<section class="actions"><button id="start" class="btn start">▶ START KURSU</button><button id="stop" class="btn stop" disabled>■ ZAKOŃCZ</button><button id="reset" class="btn reset">↻ NOWY KURS / WYCZYŚĆ</button></section>
 <section class="panel stats"><div class="stat"><span class="eyebrow">Taryfa</span><b id="tariffName">Dzienna 6–22</b></div><div class="stat"><span class="eyebrow">Czas</span><b id="timer">00:00:00</b></div><div class="stat"><span class="eyebrow">Startowa</span><b id="base">8,00 zł</b></div><div class="stat"><span class="eyebrow">Za kilometr</span><b id="rate">4,00 zł/km</b></div></section>
 <section class="panel"><div class="eyebrow">Pozycja / Google Maps</div><div class="mapbox"><div class="mapgrid"></div><div class="dot"></div><div id="mapmsg" class="mapmsg">Po uruchomieniu kursu GPS będzie aktualizował Twoją pozycję.</div></div><a id="maps" class="maplink" href="https://www.google.com/maps" target="_blank" rel="noopener">OTWÓRZ POZYCJĘ W GOOGLE MAPS ↗</a></section>
 <p class="foot">GPS działa po HTTPS (np. GitHub Pages) po udzieleniu zgody na lokalizację. Pomiar z telefonu może różnić się od certyfikowanego taksometru; aplikacja jest pomocniczym drogomierzem i kalkulatorem ceny.</p>
 </main>
 <script>
 const tariffs={1:{name:'Dzienna 6–22',base:8,rate:4},2:{name:'Nocna 22–6, Święta i niedziele',base:8,rate:5},3:{name:'BMW premium',base:30,rate:6}};
-let tariffId=1,running=false,finished=false,watchId=null,lastPoint=null,km=0,startedAt=null,timerId=null;
+const STORAGE='piker-drogomierz-v2-state';
+let tariffId=1,running=false,finished=false,watchId=null,lastPoint=null,km=0,startedAt=null,timerId=null,wakeLock=null;
 const $=id=>document.getElementById(id);const money=n=>n.toLocaleString('pl-PL',{minimumFractionDigits:2,maximumFractionDigits:2});
+function save(){localStorage.setItem(STORAGE,JSON.stringify({tariffId,running,finished,lastPoint,km,startedAt}))}
+function restore(){try{const x=JSON.parse(localStorage.getItem(STORAGE)||'null');if(!x)return;tariffId=x.tariffId||1;running=!!x.running;finished=!!x.finished;lastPoint=x.lastPoint||null;km=Number(x.km)||0;startedAt=x.startedAt||null}catch(e){}}
 function fare(){const t=tariffs[tariffId];return running||finished?t.base+km*t.rate:0}
-function update(){const t=tariffs[tariffId];$('fare').innerHTML=money(fare())+' <small>zł</small>';$('distance').textContent=km.toLocaleString('pl-PL',{minimumFractionDigits:3,maximumFractionDigits:3})+' km';$('tariffName').textContent=t.name;$('base').textContent=money(t.base)+' zł';$('rate').textContent=money(t.rate)+' zł/km'}
-function choose(id){if(running||finished)return;tariffId=+id;document.querySelectorAll('.tariff').forEach(b=>b.classList.toggle('active',+b.dataset.id===tariffId));update()}
+function update(){const t=tariffs[tariffId];$('fare').innerHTML=money(fare())+' <small>zł</small>';$('distance').textContent=km.toLocaleString('pl-PL',{minimumFractionDigits:3,maximumFractionDigits:3})+' km';$('tariffName').textContent=t.name;$('base').textContent=money(t.base)+' zł';$('rate').textContent=money(t.rate)+' zł/km';document.querySelectorAll('.tariff').forEach(b=>b.classList.toggle('active',+b.dataset.id===tariffId))}
+function choose(id){if(running||finished)return;tariffId=+id;save();update()}
 document.querySelectorAll('.tariff').forEach(b=>b.onclick=()=>choose(b.dataset.id));
 function distance(a,b){const R=6371,rad=x=>x*Math.PI/180,dLat=rad(b.lat-a.lat),dLon=rad(b.lng-a.lng),q=Math.sin(dLat/2)**2+Math.cos(rad(a.lat))*Math.cos(rad(b.lat))*Math.sin(dLon/2)**2;return 2*R*Math.asin(Math.sqrt(q))}
-function onPos(p){if(!running)return;const point={lat:p.coords.latitude,lng:p.coords.longitude,acc:p.coords.accuracy};$('maps').href=`https://www.google.com/maps/search/?api=1&query=${point.lat},${point.lng}`;$('mapmsg').textContent=`GPS: ${point.lat.toFixed(5)}, ${point.lng.toFixed(5)} • dokładność ±${Math.round(point.acc)} m`;if(point.acc>60){$('status').textContent=`Słaby sygnał GPS • ±${Math.round(point.acc)} m`;return}if(lastPoint){const d=distance(lastPoint,point);if(d>=0.005&&d<1)km+=d}lastPoint=point;$('status').textContent=`Kurs trwa • taryfa zablokowana • GPS ±${Math.round(point.acc)} m`;update()}
+async function keepAwake(){if(!running||document.visibilityState!=='visible'||!('wakeLock' in navigator))return;try{wakeLock=await navigator.wakeLock.request('screen');wakeLock.addEventListener('release',()=>{wakeLock=null})}catch(e){}}
+async function releaseAwake(){try{if(wakeLock)await wakeLock.release()}catch(e){}wakeLock=null}
+function startGps(){if(!running||watchId!==null||!navigator.geolocation)return;watchId=navigator.geolocation.watchPosition(onPos,onErr,{enableHighAccuracy:true,maximumAge:500,timeout:15000})}
+function stopGps(){if(watchId!==null&&navigator.geolocation)navigator.geolocation.clearWatch(watchId);watchId=null}
+function onPos(p){if(!running)return;const point={lat:p.coords.latitude,lng:p.coords.longitude,acc:p.coords.accuracy};$('maps').href=`https://www.google.com/maps/search/?api=1&query=${point.lat},${point.lng}`;$('mapmsg').textContent=`GPS: ${point.lat.toFixed(5)}, ${point.lng.toFixed(5)} • dokładność ±${Math.round(point.acc)} m`;if(point.acc>60){$('status').textContent=`Słaby sygnał GPS • ±${Math.round(point.acc)} m`;return}if(lastPoint){const d=distance(lastPoint,point);if(d>=0.005&&d<1)km+=d}lastPoint=point;$('status').textContent=`Kurs trwa • zapis automatyczny • GPS ±${Math.round(point.acc)} m`;save();update()}
 function onErr(e){$('status').textContent='Błąd GPS: '+e.message;$('mapmsg').textContent='Sprawdź zgodę na lokalizację oraz połączenie HTTPS.'}
 function tick(){if(!startedAt)return;const s=Math.floor((Date.now()-startedAt)/1000);$('timer').textContent=[Math.floor(s/3600),Math.floor(s%3600/60),s%60].map(x=>String(x).padStart(2,'0')).join(':')}
 function lock(v){document.querySelectorAll('.tariff').forEach(b=>b.disabled=v)}
-$('start').onclick=()=>{if(!navigator.geolocation){$('status').textContent='Ta przeglądarka nie obsługuje GPS.';return}running=true;finished=false;km=0;lastPoint=null;startedAt=Date.now();$('start').disabled=true;$('stop').disabled=false;lock(true);$('status').innerHTML='Uruchamianie GPS… <span class="locked">taryfa zablokowana</span>';update();tick();timerId=setInterval(tick,1000);watchId=navigator.geolocation.watchPosition(onPos,onErr,{enableHighAccuracy:true,maximumAge:500,timeout:15000})};
-$('stop').onclick=()=>{running=false;finished=true;if(watchId!==null)navigator.geolocation.clearWatch(watchId);watchId=null;clearInterval(timerId);$('stop').disabled=true;$('start').disabled=true;lock(true);$('status').textContent='Kurs zakończony • kwota końcowa';$('mapmsg').textContent+=' • kurs zakończony';update()};
-$('reset').onclick=()=>{if(watchId!==null)navigator.geolocation.clearWatch(watchId);clearInterval(timerId);running=false;finished=false;watchId=null;lastPoint=null;km=0;startedAt=null;$('timer').textContent='00:00:00';$('start').disabled=false;$('stop').disabled=true;lock(false);$('status').textContent='Wybierz taryfę i rozpocznij kurs';$('mapmsg').textContent='Po uruchomieniu kursu GPS będzie aktualizował Twoją pozycję.';$('maps').href='https://www.google.com/maps';update()};update();
+function syncButtons(){lock(running||finished);$('start').disabled=running||finished;$('stop').disabled=!running}
+$('start').onclick=async()=>{if(!navigator.geolocation){$('status').textContent='Ta przeglądarka nie obsługuje GPS.';return}running=true;finished=false;km=0;lastPoint=null;startedAt=Date.now();syncButtons();$('status').innerHTML='Uruchamianie GPS… <span class="locked">taryfa zablokowana</span>';save();update();tick();clearInterval(timerId);timerId=setInterval(tick,1000);startGps();await keepAwake()};
+$('stop').onclick=async()=>{running=false;finished=true;stopGps();clearInterval(timerId);await releaseAwake();syncButtons();$('status').textContent='Kurs zakończony • kwota końcowa';$('mapmsg').textContent+=' • kurs zakończony';save();update()};
+$('reset').onclick=async()=>{stopGps();clearInterval(timerId);await releaseAwake();running=false;finished=false;lastPoint=null;km=0;startedAt=null;$('timer').textContent='00:00:00';syncButtons();$('status').textContent='Wybierz taryfę i rozpocznij kurs';$('mapmsg').textContent='Po uruchomieniu kursu GPS będzie aktualizował Twoją pozycję.';$('maps').href='https://www.google.com/maps';save();update()};
+document.addEventListener('visibilitychange',async()=>{if(document.visibilityState==='visible'&&running){startGps();await keepAwake();$('status').textContent='Kurs wznowiony • dane zachowane';tick()}else if(document.visibilityState==='hidden'){save();stopGps()}});
+window.addEventListener('pagehide',save);window.addEventListener('beforeunload',save);
+restore();update();syncButtons();if(running){$('status').textContent='Kurs przywrócony • uruchamiam GPS';tick();timerId=setInterval(tick,1000);startGps();keepAwake()}else if(finished){$('status').textContent='Kurs zakończony • kwota końcowa'}
 </script>
 </body></html>
